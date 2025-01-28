@@ -54,8 +54,18 @@ export class MultiClientManager {
                     ownerId: tokenConfig.ownerId
                 }
             });
-
+    
+            (client as any).commandHandler = commandHandler;
+    
             await commandHandler.loadCommands();
+            
+            client.on('messageCreate', async (message) => {
+                try {
+                    await commandHandler.handleCommand(message);
+                } catch (error) {
+                    Logger.error(`Error handling message: ${(error as Error).message}`);
+                }
+            });
             
             this.clients.set(tokenConfig.token, client);
             this.commandHandlers.set(tokenConfig.token, commandHandler);
