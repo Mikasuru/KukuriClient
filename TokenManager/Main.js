@@ -260,7 +260,7 @@ async function HelpCmd(message) {
     const embed = new EmbedBuilder()
         .setTitle('Available Commands')
         .setDescription(`
-            \`!add <token> [prefix]\` - Add or update your token
+            \`!add\` - Add or update your token
             \`!remove\` - Remove your token
             \`!help\` - Show this help message
         `)
