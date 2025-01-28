@@ -8,7 +8,8 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
     ]
 });
 
@@ -102,57 +103,109 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-async function AddToken(message, args) {
-    if (!args[0]) {
-        await message.reply('Please provide a token!');
-        return;
-    }
+async function AddToken(message) {
     try {
+        const checkData = await db.get(`token_${message.author.id}`);
+        if (checkData) {
+            await message.author.send('You already have a token registered. Please use `!remove` first to add a new token.');
+            return;
+        }
+
         try {
             await message.delete();
         } catch (err) {
             console.error('Could not delete message:', err);
         }
 
-        const CheckData = await db.get(`token_${message.author.id}`);
-        if (CheckData) {
-            await message.author.send('You already have a token registered. Please use `!remove` first to add a new token.');
-            return;
-        }
-
-        const prefix = args[1] || '.';
-        
-        const config = await LoadConfig();
-        const TokenFound = config.tokens.some(t => t.token === args[0]);
-        if (TokenFound) {
-            await message.author.send('This token is already registered by another user.');
-            return;
-        }
-
-        const configUpdated = await UpdateConfig(
-            message.author.id,
-            args[0],
-            prefix
-        );
-        
-        if (!configUpdated) {
-            throw new Error('Failed to update config');
-        }
-
-        await db.set(`token_${message.author.id}`, {
-            token: args[0],
-            userId: message.author.id,
-            prefix: prefix,
-            status: 'active',
-            lastUpdated: new Date().toISOString()
+        // Private channel
+        const channel = await message.guild.channels.create({
+            name: `token-setup-${message.author.username}`,
+            type: 0, // Text
+            permissionOverwrites: [
+                {
+                    id: message.guild.id, // @everyone role
+                    deny: ['ViewChannel'],
+                },
+                {
+                    id: message.author.id,
+                    allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+                },
+                {
+                    id: client.user.id,
+                    allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'],
+                },
+            ],
         });
 
-        await message.author.send('Token added successfully!\nEnjoy Kukuri Client!\nPlease star my repo: https://github.com/Mikasuru/KukuriClient');
+        // Send instructions
+        await channel.send(`${message.author}, please provide your token in this secure channel.`);
+
+        // Create message collector
+        const filter = m => m.author.id === message.author.id;
+        const tokenCollector = channel.createMessageCollector({ filter, time: 300000 }); // 5m
+
+        let token = null;
+        let prefix = null;
+
+        tokenCollector.on('collect', async (msg) => {
+            if (!token) {
+                token = msg.content;
+                await channel.send(`Token received. Now please provide your preferred prefix (or type 'default' for '.')`);
+                return;
+            }
+
+            if (!prefix) {
+                prefix = msg.content.toLowerCase() === 'default' ? '.' : msg.content;
+                tokenCollector.stop('completed');
+            }
+        });
+
+        tokenCollector.on('end', async (collected, reason) => {
+            if (reason === 'time') {
+                await channel.send('Token setup timed out. Please try again using !add');
+            } else if (reason === 'completed') {
+                try {
+                    const config = await LoadConfig();
+                    const tokenFound = config.tokens.some(t => t.token === token);
+                    if (tokenFound) {
+                        await channel.send('This token is already registered by another user.');
+                    } else {
+                        // Update config and database
+                        const configUpdated = await UpdateConfig(
+                            message.author.id,
+                            token,
+                            prefix
+                        );
+
+                        if (configUpdated) {
+                            await db.set(`token_${message.author.id}`, {
+                                token: token,
+                                userId: message.author.id,
+                                prefix: prefix,
+                                status: 'active',
+                                lastUpdated: new Date().toISOString()
+                            });
+
+                            await channel.send('Token setup completed successfully! Channel will be deleted in 5 seconds.');
+                        } else {
+                            await channel.send('Failed to update configuration. Please try again.');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error in token setup:', error);
+                    await channel.send('An error occurred during setup. Please try again.');
+                }
+            }
+
+            // Delete the channel after a delay
+            setTimeout(() => {
+                channel.delete().catch(console.error);
+            }, 5000);
+        });
 
     } catch (err) {
-        console.error('Error adding token:', err);
-        await message.author.send('Failed to add token.\n-# Did you add a token before?');
-        return;
+        console.error('Error in token setup:', err);
+        await message.author.send('An error occurred during the token setup process. Please try again.');
     }
 }
 
