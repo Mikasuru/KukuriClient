@@ -14,6 +14,7 @@ export class EventHandler {
 
     public async loadEvents(): Promise<void> {
         try {
+            this.client.removeAllListeners();
             const eventFiles = await fs.readdir(this.eventsPath);
             
             for (const file of eventFiles) {

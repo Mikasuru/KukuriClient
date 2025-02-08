@@ -1,9 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { Config } from '../interfaces';
+import { Config, TokenConfig } from '../interfaces';
 import Logger from './Logger';
 
-export class ConfigManager {
+class ConfigManager {
     private static instance: ConfigManager;
     private config: Config;
     private readonly configPath: string;
@@ -14,11 +14,11 @@ export class ConfigManager {
             botAdmins: []
         },
         generalSettings: {
+            ownerId: '',
             showLoadCommands: true,
             enableNsfw: false,
             enableDelete: true,
-            showStartMessage: false,
-            ownerId: ''
+            showStartMessage: false
         },
         commandSettings: {
             deleteExecuted: true,
@@ -43,6 +43,7 @@ export class ConfigManager {
         },
         commands: {}
     };
+    private isReloading: boolean = false;
 
     private constructor() {
         this.configPath = path.join(__dirname, '..', 'config', 'Config.json');
@@ -57,53 +58,79 @@ export class ConfigManager {
     }
 
     public async loadConfig(): Promise<void> {
+        if (this.isReloading) return;
+        this.isReloading = true;
         try {
-            const configExists = await this.checkConfigExists();
+            const exists = await this.checkConfigExists();
             
-            if (!configExists) {
-                await this.createDefaultConfig();
+            if (!exists) {
+                Logger.info('Config file not found, creating new one...');
+                await this.saveConfig();
+                return;
             }
 
-            const configData = await fs.readFile(this.configPath, 'utf-8');
-            this.config = JSON.parse(configData);
+            const data = await fs.readFile(this.configPath, 'utf8');
+            //Logger.info(`Raw config data: ${data}`); // Debug line
             
-            // Validate config
-            await this.validateConfig();
+            const parsedConfig = JSON.parse(data);
+            //Logger.info(`Parsed config: ${JSON.stringify(parsedConfig)}`); // Debug line
             
-            Logger.info('Configuration loaded successfully');
-        } catch (error) {
-            Logger.error(`Failed to load config: ${(error as Error).message}`);
-            throw error;
+            if (!parsedConfig.tokens) {
+                Logger.warning('No tokens array found in config');
+                parsedConfig.tokens = [];
+            }
+
+            // Merge with default config
+            this.config = {
+                ...this.defaultConfig,
+                ...parsedConfig,
+                // Ensure nested objects are properly merged
+                botSettings: {
+                    ...this.defaultConfig.botSettings,
+                    ...parsedConfig.botSettings
+                },
+                generalSettings: {
+                    ...this.defaultConfig.generalSettings,
+                    ...parsedConfig.generalSettings
+                },
+                commandSettings: {
+                    ...this.defaultConfig.commandSettings,
+                    ...parsedConfig.commandSettings
+                },
+                embedSettings: {
+                    ...this.defaultConfig.embedSettings,
+                    ...parsedConfig.embedSettings
+                },
+                notificationSettings: {
+                    ...this.defaultConfig.notificationSettings,
+                    ...parsedConfig.notificationSettings
+                }
+            };
+
+            Logger.info(`Loaded config with ${this.config.tokens.length} tokens`);
+            
+            if (this.config.tokens.length > 0) {
+                //Logger.info('Token owners:', this.config.tokens.map(t => t.ownerId).join(', '));
+            }
+
+        } finally {
+            this.isReloading = false;
         }
     }
 
-    private async validateConfig(): Promise<void> {
-        if (!this.config.tokens || !Array.isArray(this.config.tokens) || this.config.tokens.length === 0) {
-            throw new Error('No tokens configured in config');
-        }
-
-        for (const tokenConfig of this.config.tokens) {
-            if (!tokenConfig.token) {
-                throw new Error('Missing token in token configuration');
-            }
-            if (!tokenConfig.ownerId) {
-                throw new Error('Missing ownerId in token configuration');
-            }
-        }
-
-        const requiredSections = [
-            'generalSettings',
-            'commandSettings',
-            'embedSettings',
-            'notificationSettings',
-            'commands'
-        ];
-
-        for (const section of requiredSections) {
-            if (!(section in this.config)) {
-                Logger.warning(`Missing ${section} in config, using defaults`);
-                (this.config as any)[section] = (this.defaultConfig as any)[section];
-            }
+    public async saveConfig(): Promise<void> {
+        try {
+            const configDir = path.dirname(this.configPath);
+            await fs.mkdir(configDir, { recursive: true });
+            
+            const configString = JSON.stringify(this.config, null, 2);
+            Logger.info(`Saving config: ${configString}`);
+            
+            await fs.writeFile(this.configPath, configString);
+            Logger.info('Config saved successfully');
+        } catch (error) {
+            Logger.error(`Failed to save config: ${(error as Error).message}`);
+            throw error;
         }
     }
 
@@ -116,66 +143,39 @@ export class ConfigManager {
         }
     }
 
-    private async createDefaultConfig(): Promise<void> {
-        try {
-            const configDir = path.dirname(this.configPath);
-            await fs.mkdir(configDir, { recursive: true });
-            await this.saveConfig(this.defaultConfig);
-            Logger.info('Created default configuration file');
-        } catch (error) {
-            Logger.error(`Failed to create default config: ${(error as Error).message}`);
-            throw error;
-        }
-    }
-
-    public async saveConfig(newConfig?: Partial<Config>): Promise<void> {
-        try {
-            if (newConfig) {
-                this.config = {
-                    ...this.config,
-                    ...newConfig
-                };
-            }
-
-            await fs.writeFile(
-                this.configPath,
-                JSON.stringify(this.config, null, 2),
-                'utf-8'
-            );
-            
-            Logger.info('Configuration saved successfully');
-        } catch (error) {
-            Logger.error(`Failed to save config: ${(error as Error).message}`);
-            throw error;
-        }
-    }
-
     public getConfig(): Config {
         return this.config;
     }
 
-    public updateConfig(path: string, value: any): void {
-        const keys = path.split('.');
-        let current: any = this.config;
-
-        for (let i = 0; i < keys.length - 1; i++) {
-            if (!(keys[i] in current)) {
-                current[keys[i]] = {};
-            }
-            current = current[keys[i]];
-        }
-
-        current[keys[keys.length - 1]] = value;
+    public getTokenConfig(userId: string): TokenConfig | undefined {
+        return this.config.tokens.find(t => t.ownerId === userId);
     }
 
-    public async reset(): Promise<void> {
-        try {
-            await this.saveConfig(this.defaultConfig);
-            Logger.info('Configuration reset to defaults');
-        } catch (error) {
-            Logger.error(`Failed to reset config: ${(error as Error).message}`);
-            throw error;
+    public async addToken(tokenConfig: TokenConfig): Promise<void> {
+        const existingIndex = this.config.tokens.findIndex(t => t.ownerId === tokenConfig.ownerId);
+        
+        if (existingIndex !== -1) {
+            Logger.info(`Updating existing token for user ${tokenConfig.ownerId}`);
+            this.config.tokens[existingIndex] = tokenConfig;
+        } else {
+            Logger.info(`Adding new token for user ${tokenConfig.ownerId}`);
+            this.config.tokens.push(tokenConfig);
         }
+
+        await this.saveConfig();
+    }
+
+    public async removeToken(userId: string): Promise<boolean> {
+        const initialLength = this.config.tokens.length;
+        this.config.tokens = this.config.tokens.filter(t => t.ownerId !== userId);
+        
+        if (this.config.tokens.length !== initialLength) {
+            Logger.info(`Removed token for user ${userId}`);
+            await this.saveConfig();
+            return true;
+        }
+        Logger.info(`No token found for user ${userId}`);
+        return false;
     }
 }
 

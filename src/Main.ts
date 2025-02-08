@@ -1,32 +1,75 @@
 import { MultiClientManager } from './modules/MultiClientManager';
 import ConfigManager from './modules/ConfigManager';
 import Logger from './modules/Logger';
+import fs from 'fs';
 
-async function main(): Promise<void> {
-    try {
-        Logger.getInstance({ // Initialize logger
-            saveToFile: false
+class SelfbotClient {
+    private configManager: ConfigManager;
+    private multiClientManager: MultiClientManager | null;
+    private configWatcher: fs.FSWatcher | null = null;
+
+    constructor() {
+        this.configManager = ConfigManager.getInstance();
+        this.multiClientManager = null;
+    }
+
+    public async start(): Promise<void> {
+        try {
+            Logger.info('Starting Selfbot Client...');
+            
+            await this.configManager.loadConfig();
+            const config = this.configManager.getConfig();
+            
+            this.multiClientManager = new MultiClientManager(config);
+            
+            await this.multiClientManager.initialize();
+            
+            this.startConfigWatcher();
+            this.setupProcessHandlers();
+            
+            Logger.info('Selfbot Client started successfully!');
+        } catch (error) {
+            Logger.error(`Failed to start: ${(error as Error).message}`);
+            process.exit(1);
+        }
+    }
+
+    private startConfigWatcher(): void {
+        if (!this.multiClientManager) return;
+
+        const configPath = process.cwd() + '/src/config/Config.json';
+        if (this.configWatcher) {
+            this.configWatcher.close();
+        }
+
+        this.configWatcher = fs.watch(configPath, async (eventType) => {
+            if (eventType === 'change') {
+                try {
+                    // Reload config
+                    await this.configManager.loadConfig();
+                    const newConfig = this.configManager.getConfig();
+                    
+                    Logger.info(`Config reloaded with ${newConfig.tokens.length} tokens`);
+                    
+                    // Reload clients with new config
+                    await this.multiClientManager?.reload(newConfig);
+                    
+                    Logger.info('Configuration reloaded successfully');
+                } catch (error) {
+                    Logger.error(`Failed to reload config: ${(error as Error).message}`);
+                }
+            }
         });
+    }
 
-        Logger.info('Starting Kukuri Client...');
-        
-        const configManager = ConfigManager.getInstance(); // Initialize and load configuration
-        await configManager.loadConfig();
-        const config = configManager.getConfig();
-
-        Logger.info('Configuration loaded successfully');
-
-        const clientManager = new MultiClientManager(config);
-
+    private setupProcessHandlers(): void {
         process.on('SIGINT', async () => {
-            Logger.info('Received SIGINT. Cleaning up...');
-            await clientManager.destroy();
+            await this.shutdown();
             process.exit(0);
         });
 
         process.on('SIGTERM', async () => {
-            Logger.info('Received SIGTERM. Cleaning up...');
-            await clientManager.destroy();
+            await this.shutdown();
             process.exit(0);
         });
 
@@ -39,20 +82,28 @@ async function main(): Promise<void> {
             Logger.error(`Unhandled Rejection at: ${promise}`);
             Logger.error(`Reason: ${reason}`);
         });
+    }
 
-        // Initialize all clients
-        await clientManager.Initialize();
+    private async shutdown(): Promise<void> {
+        Logger.info('Shutting down...');
         
-        Logger.info('Kukuri Client >> Started successfully!');
-
-    } catch (error) {
-        Logger.error(`Failed to start application: ${(error as Error).message}`);
-        process.exit(1);
+        if (this.configWatcher) {
+            this.configWatcher.close();
+        }
+        
+        if (this.multiClientManager) {
+            await this.multiClientManager.destroyAll();
+        }
+        Logger.info('Shutdown complete');
     }
 }
 
+// Debug line to see what's in process.cwd()
+Logger.info(`Current working directory: ${process.cwd()}`);
+
 // Start the application
-main().catch((error) => {
-    Logger.error(`Critical error: ${error.message}`);
+const client = new SelfbotClient();
+client.start().catch((error) => {
+    Logger.error(`Failed to start application: ${error.message}`);
     process.exit(1);
 });

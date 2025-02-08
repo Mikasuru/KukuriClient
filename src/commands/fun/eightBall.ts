@@ -11,7 +11,7 @@ const command: Command = {
     
     async execute(message: Message, args: string[], client: Client): Promise<void> {
         if (args.length === 0) {
-            await message.channel.send('Please ask a question!');
+            await message.channel.send('Please ask a question!\n`Example: .8ball Will I ace my test?`');
             return;
         }
 

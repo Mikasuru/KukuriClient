@@ -14,7 +14,7 @@ const command: Command = {
         const userChoice = args[0]?.toLowerCase();
         
         if (!choices.includes(userChoice)) {
-            await message.channel.send('Please choose rock, paper, or scissors!');
+            await message.channel.send('Please choose rock, paper, or scissors!\n`Example: .rps rock`');
             return;
         }
 
@@ -34,7 +34,7 @@ const command: Command = {
         }
 
         await message.channel.send(
-            `✂️ Your choice: ${userChoice}\n` +
+            `Your choice: ${userChoice}\n` +
             `My choice: ${botChoice}\n` +
             `Result: ${result}`
         );

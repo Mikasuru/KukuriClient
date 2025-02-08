@@ -1,86 +1,97 @@
 import { Client } from 'discord.js-selfbot-v13';
 import ConfigManager from './ConfigManager';
 import Logger from './Logger';
+import { MultiClientManager } from './MultiClientManager';
+import { Config } from '../interfaces';
+import fs from 'fs';
 
 export class ConfigMonitor {
     private static instance: ConfigMonitor;
     private configManager: ConfigManager;
-    private monitorInterval: NodeJS.Timeout | null;
-    private lastConfigHash: string;
-    private client: Client;
+    private multiClientManager: MultiClientManager;
+    private isReloading: boolean;
+    private configWatcher: fs.FSWatcher | null;
 
-    private constructor(client: Client) {
+    private constructor() {
         this.configManager = ConfigManager.getInstance();
-        this.monitorInterval = null;
-        this.lastConfigHash = '';
-        this.client = client;
+        this.multiClientManager = new MultiClientManager(this.configManager.getConfig());
+        this.isReloading = false;
+        this.configWatcher = null;
     }
 
-    public static getInstance(client: Client): ConfigMonitor {
+    public static getInstance(): ConfigMonitor {
         if (!ConfigMonitor.instance) {
-            ConfigMonitor.instance = new ConfigMonitor(client);
+            ConfigMonitor.instance = new ConfigMonitor();
         }
         return ConfigMonitor.instance;
     }
 
-    private async checkConfig(): Promise<void> {
+    public async initialize(): Promise<void> {
         try {
             await this.configManager.loadConfig();
-            const currentConfig = this.configManager.getConfig();
-            const currentHash = JSON.stringify(currentConfig);
-
-            if (this.lastConfigHash && this.lastConfigHash !== currentHash) {
-                Logger.info('Config change detected, applying updates...');
-                
-                await this.applyConfigChanges(currentConfig);
-            }
-
-            this.lastConfigHash = currentHash;
+            const config = this.configManager.getConfig();
+            this.multiClientManager = new MultiClientManager(config);
+            await this.multiClientManager.initialize();
+            Logger.info('ConfigMonitor initialized successfully');
         } catch (error) {
-            Logger.error(`Error checking config: ${(error as Error).message}`);
-        }
-    }
-
-    private async applyConfigChanges(newConfig: any): Promise<void> {
-        try {
-            if (this.client.user) {
-                if (newConfig.presenceSettings?.enabled) {
-                    await this.client.user.setPresence({
-                        status: newConfig.presenceSettings.status
-                    });
-                }
-            }
-
-            Logger.info('Config changes applied successfully');
-        } catch (error) {
-            Logger.error(`Error applying config changes: ${(error as Error).message}`);
+            Logger.error(`Failed to initialize ConfigMonitor: ${(error as Error).message}`);
+            throw error;
         }
     }
 
     public startMonitoring(): void {
-        if (this.monitorInterval) {
-            clearInterval(this.monitorInterval);
+        const configPath = process.cwd() + '/src/config/Config.json';
+
+        if (this.configWatcher) {
+            this.configWatcher.close();
         }
 
-        this.checkConfig().catch(error => {
-            Logger.error(`Initial config check failed: ${error.message}`);
+        this.configWatcher = fs.watch(configPath, async (eventType) => {
+            if (eventType === 'change' && !this.isReloading) {
+                await this.handleConfigChange();
+            }
         });
-
-        this.monitorInterval = setInterval(() => {
-            this.checkConfig().catch(error => {
-                Logger.error(`Config check failed: ${error.message}`);
-            });
-        }, 60000); // 1m
 
         Logger.info('Config monitoring started');
     }
 
+    private async handleConfigChange(): Promise<void> {
+        try {
+            this.isReloading = true;
+            Logger.info('Config change detected, reloading...');
+
+            await this.configManager.loadConfig();
+            const newConfig = this.configManager.getConfig();
+
+            const oldClients = this.multiClientManager;
+
+            this.multiClientManager = new MultiClientManager(newConfig);
+            await this.multiClientManager.initialize();
+
+            await oldClients.destroyAll();
+
+            Logger.info('Configuration and clients reloaded successfully');
+        } catch (error) {
+            Logger.error(`Failed to handle config change: ${(error as Error).message}`);
+        } finally {
+            this.isReloading = false;
+        }
+    }
+
     public stopMonitoring(): void {
-        if (this.monitorInterval) {
-            clearInterval(this.monitorInterval);
-            this.monitorInterval = null;
+        if (this.configWatcher) {
+            this.configWatcher.close();
+            this.configWatcher = null;
             Logger.info('Config monitoring stopped');
         }
+    }
+
+    public getMultiClientManager(): MultiClientManager {
+        return this.multiClientManager;
+    }
+
+    public async forceReload(): Promise<void> {
+        await this.handleConfigChange();
     }
 }
 

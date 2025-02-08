@@ -2,43 +2,7 @@ import { Client, Message, Collection } from 'discord.js-selfbot-v13';
 import fs from 'fs/promises';
 import path from 'path';
 import Logger from './Logger';
-
-export interface Command {
-    name: string;
-    description: string;
-    category: string;
-    aliases?: string[];
-    cooldown?: number;
-    permissions?: string[];
-    usage?: string;
-    execute: (message: Message, args: string[], client: Client) => Promise<Message | void>;
-    init?: (client: Client) => void;
-}
-
-export interface Config {
-    botSettings: {
-        token: string;
-        prefix: string;
-        botAdmins: string[];
-    };
-    generalSettings: {
-        ownerId: string;
-        showLoadCommands: boolean;
-        enableNsfw: boolean;
-        enableDelete: boolean;
-        showStartMessage: boolean;
-    };
-    commandSettings: {
-        deleteExecuted: boolean;
-        deleteInTime: boolean;
-        secondToDelete: number;
-    };
-    notificationSettings: {
-        enabled: boolean;
-        webhook: string;
-    };
-    commands: Record<string, any>;
-}
+import { Command, Config } from '../interfaces';
 
 export class CommandHandler {
     private readonly client: Client;
@@ -46,6 +10,7 @@ export class CommandHandler {
     private readonly aliases: Collection<string, string>;
     private readonly cooldowns: Collection<string, Collection<string, number>>;
     private readonly config: Config;
+    private processingCommands: Set<string>;
 
     constructor(client: Client, config: Config) {
         this.client = client;
@@ -53,63 +18,60 @@ export class CommandHandler {
         this.commands = new Collection();
         this.aliases = new Collection();
         this.cooldowns = new Collection();
-    }
+        this.processingCommands = new Set();
 
-    private async handleAutoDelete(message: Message, botMessage: Message | undefined | void): Promise<void> {
-        try {
-            const { deleteExecuted, deleteInTime, secondToDelete } = this.config.commandSettings;
-
-            // Delete the user's command message if enabled
-            if (deleteExecuted && message.deletable) {
-                await message.delete().catch(() => {
-                    Logger.warning(`Failed to delete command message: ${message.id}`);
-                });
-            }
-
-            // Delete bot's response after specified time if enabled
-            if (deleteInTime && botMessage && 'deletable' in botMessage && botMessage.deletable) {
-                setTimeout(async () => {
-                    try {
-                        await botMessage.delete();
-                    } catch (error) {
-                        Logger.warning(`Failed to delete bot message: ${botMessage.id}`);
-                    }
-                }, secondToDelete);
-            }
-        } catch (error) {
-            Logger.error(`Error in auto-delete system: ${(error as Error).message}`);
+        if (!this.client.commandHandler) {
+            this.client.commandHandler = this;
         }
     }
 
-    public async loadCommands(directory: string = 'commands'): Promise<void> {
+    public async loadCommands(baseDir: string = 'src/commands'): Promise<void> {
         try {
-            const baseDir = path.join(__dirname, '..', directory);
-            await this.loadCommandsRecursive(baseDir);
+            Logger.info('Loading commands...');
+            // Clear existing commands
+            this.commands.clear();
+            this.aliases.clear();
+            this.cooldowns.clear();
+
+            const fullPath = path.join(process.cwd(), baseDir);
+            Logger.info(`Loading commands from: ${fullPath}`);
+            
+            await this.loadCommandsRecursive(fullPath);
             Logger.info(`Successfully loaded ${this.commands.size} commands`);
         } catch (error) {
             Logger.error(`Failed to load commands: ${(error as Error).message}`);
+            throw error;
         }
     }
 
     private async loadCommandsRecursive(dir: string): Promise<void> {
-        const items = await fs.readdir(dir);
-        
-        for (const item of items) {
-            const fullPath = path.join(dir, item);
-            const stat = await fs.stat(fullPath);
+        try {
+            const items = await fs.readdir(dir);
+            
+            for (const item of items) {
+                const fullPath = path.join(dir, item);
+                const stat = await fs.stat(fullPath);
 
-            if (stat.isDirectory()) {
-                await this.loadCommandsRecursive(fullPath);
-            } else if (item.endsWith('.ts') || item.endsWith('.js')) {
-                try {
-                    const command = require(fullPath).default as Command;
-                    if (this.validateCommand(command)) {
-                        this.registerCommand(command);
+                if (stat.isDirectory()) {
+                    await this.loadCommandsRecursive(fullPath);
+                } else if (item.endsWith('.ts') || item.endsWith('.js')) {
+                    try {
+                        //Logger.info(`Loading command file: ${item}`);
+                        const commandModule = require(fullPath);
+                        const command = commandModule.default as Command;
+
+                        if (this.validateCommand(command)) {
+                            this.registerCommand(command);
+                            //Logger.info(`Registered command: ${command.name}`);
+                        }
+                    } catch (error) {
+                        Logger.error(`Error loading command ${item}: ${(error as Error).message}`);
                     }
-                } catch (error) {
-                    Logger.error(`Error loading command ${item}: ${(error as Error).message}`);
                 }
             }
+        } catch (error) {
+            //Logger.error(`Error in loadCommandsRecursive: ${error.message}`);
+            throw error;
         }
     }
 
@@ -126,10 +88,6 @@ export class CommandHandler {
                 this.aliases.set(alias, command.name);
             });
         }
-
-        if (this.config.generalSettings.showLoadCommands) {
-            Logger.info(`Registered command: ${command.name}`);
-        }
     }
 
     private async executeCommand(command: Command, message: Message, args: string[]): Promise<void> {
@@ -138,7 +96,7 @@ export class CommandHandler {
             await this.handleAutoDelete(message, botMessage);
         } catch (error) {
             Logger.error(`Error executing command ${command.name}: ${(error as Error).message}`);
-            const errorMessage = await message.channel.send('An error occurred while executing the command.');
+            const errorMessage = await message.channel.send('```❌ An error occurred while executing the command.```');
             
             if (this.config.commandSettings.deleteInTime) {
                 setTimeout(() => {
@@ -151,32 +109,79 @@ export class CommandHandler {
     }
 
     public async handleCommand(message: Message): Promise<void> {
-        if (!message.content.startsWith(this.config.botSettings.prefix)) return;
-        if (message.author.bot) return;
+        const tokenConfig = this.config.tokens[0];
+        if (!tokenConfig) return;
 
-        if (message.author.id !== this.config.generalSettings.ownerId && 
-            !this.config.botSettings.botAdmins.includes(message.author.id)) {
+        const prefix = tokenConfig.prefix;
+        if (!message.content.startsWith(prefix)) return;
+        
+        const commandId = `${message.id}-${message.author.id}`;
+        
+        if (this.processingCommands.has(commandId)) {
+            Logger.info(`Command ${commandId} is already being processed`);
             return;
         }
 
-        const args = message.content
-            .slice(this.config.botSettings.prefix.length)
-            .trim()
-            .split(/ +/);
-        const commandName = args.shift()?.toLowerCase();
-
-        if (!commandName) return;
-
-        const command = this.commands.get(commandName) || 
-                       this.commands.get(this.aliases.get(commandName) || '');
-
-        if (!command) return;
+        this.processingCommands.add(commandId);
 
         try {
-            if (await this.checkCooldown(message, command)) return;
-            await this.executeCommand(command, message, args);
+            Logger.info(`Received command: ${message.content}`);
+
+            if (message.author.bot) return;
+            if (message.author.id !== tokenConfig.ownerId) {
+                Logger.info(`Command rejected: User ${message.author.id} is not the owner`);
+                return;
+            }
+
+            const args = message.content.slice(prefix.length).trim().split(/ +/);
+            const commandName = args.shift()?.toLowerCase();
+
+            if (!commandName) return;
+
+            Logger.info(`Processing command: ${commandName} with args: ${args.join(', ')}`);
+
+            const command = this.commands.get(commandName) || 
+                         this.commands.get(this.aliases.get(commandName) || '');
+
+            if (!command) {
+                Logger.info(`Command not found: ${commandName}`);
+                return;
+            }
+
+            try {
+                Logger.info(`Executing command: ${command.name}`);
+                if (await this.checkCooldown(message, command)) return;
+                await this.executeCommand(command, message, args);
+                Logger.info(`Command executed successfully: ${command.name}`);
+            } catch (error) {
+                Logger.error(`Error in command handling: ${(error as Error).message}`);
+            }
+        } finally {
+            this.processingCommands.delete(commandId);
+        }
+    }
+
+    private async handleAutoDelete(message: Message, botMessage: Message | undefined | void): Promise<void> {
+        try {
+            const { deleteExecuted, deleteInTime, secondToDelete } = this.config.commandSettings;
+
+            if (deleteExecuted && message.deletable) {
+                await message.delete().catch(() => {
+                    Logger.warning(`Failed to delete command message: ${message.id}`);
+                });
+            }
+
+            if (deleteInTime && botMessage && 'deletable' in botMessage && botMessage.deletable) {
+                setTimeout(async () => {
+                    try {
+                        await botMessage.delete();
+                    } catch (error) {
+                        Logger.warning(`Failed to delete bot message: ${botMessage.id}`);
+                    }
+                }, secondToDelete);
+            }
         } catch (error) {
-            Logger.error(`Error in command handling: ${(error as Error).message}`);
+            Logger.error(`Error in auto-delete system: ${(error as Error).message}`);
         }
     }
 
@@ -212,7 +217,7 @@ export class CommandHandler {
             if (now < expirationTime) {
                 const timeLeft = (expirationTime - now) / 1000;
                 await message.reply(
-                    `Please wait ${timeLeft.toFixed(1)} more seconds before using the \`${command.name}\` command.`
+                    `\`\`\`❌ Please wait ${timeLeft.toFixed(1)} more seconds before using the \`${command.name}\` command.\`\`\``
                 );
                 return true;
             }

@@ -91,7 +91,7 @@ export class ClientManager {
 
     private async login(): Promise<void> {
         try {
-            await this.client.login(this.config.botSettings.token);
+            await this.client.login(true, this.config.botSettings.token);
         } catch (error) {
             Logger.error(`Failed to login: ${(error as Error).message}`);
             throw error;

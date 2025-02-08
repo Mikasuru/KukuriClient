@@ -4,12 +4,12 @@
       "token": "",
       "ownerId": "",
       "prefix": "",
-      "allowedUsers": []
+      "allowedUsers": [""]
     }
   ],
   "botSettings": {
-    "prefix": ".",
-    "botAdmins": []
+    "prefix": "",
+    "botAdmins": [""]
   },
   "generalSettings": {
     "ownerId": "",

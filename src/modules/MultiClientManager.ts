@@ -1,137 +1,159 @@
-import { Client } from 'discord.js-selfbot-v13';
-import { CommandHandler } from './CommandHandler';
+import { Client, Message, PartialMessage } from 'discord.js-selfbot-v13';
 import { Config, TokenConfig } from '../interfaces';
+import { CommandHandler } from './CommandHandler';
 import Logger from './Logger';
-import { ConfigMonitor } from './ConfigMonitor';
+
+import MessageStore from './MessageStore';
+import { initAutoReactHandler } from '@/commands/utility/autoreact';
+import { initRPCHandler } from '@/commands/utility/rpc';
 
 export class MultiClientManager {
     private clients: Map<string, Client>;
     private commandHandlers: Map<string, CommandHandler>;
     private config: Config;
-    private configMonitor: ConfigMonitor | null;
+    private hasInitialized: boolean;
+    private deletedMessages: Map<string, Map<string, Message[]>>;
+    private readonly maxStoredMessages = 10;
     
     constructor(config: Config) {
         this.clients = new Map();
         this.commandHandlers = new Map();
         this.config = config;
-        this.configMonitor = null;
+        this.hasInitialized = false;
+        this.deletedMessages = new Map();
     }
 
-    public async Initialize(): Promise<void> {
+    public getDeletedMessages(ownerId: string, channelId: string): Message[] | undefined {
+        const ownerMessages = this.deletedMessages.get(ownerId);
+        if (!ownerMessages) return undefined;
+        return ownerMessages.get(channelId);
+    }
+
+    public async initialize(): Promise<void> {
+        if (this.hasInitialized) {
+            await this.destroyAll();
+        }
+
         try {
-            if (!this.config.tokens || !Array.isArray(this.config.tokens)) {
-                throw new Error('No tokens configured');
-            }
+            Logger.info(`Found ${this.config.tokens.length} tokens in config`);
 
             for (const tokenConfig of this.config.tokens) {
-                await this.ClientInit(tokenConfig);
+                await this.initializeClient(tokenConfig);
             }
-            
-            const firstClient = this.clients.values().next().value;
-            if (firstClient) {
-                this.configMonitor = ConfigMonitor.getInstance(firstClient);
-                this.configMonitor.startMonitoring();
-            }
-            
+
+            this.hasInitialized = true;
             Logger.info(`Initialized ${this.clients.size} clients successfully`);
         } catch (error) {
-            Logger.error(`Failed to Initialize clients: ${(error as Error).message}`);
+            Logger.error(`Failed to initialize clients: ${(error as Error).message}`);
             throw error;
         }
     }
 
-    private async ClientInit(tokenConfig: TokenConfig): Promise<void> {
+    private async initializeClient(tokenConfig: TokenConfig): Promise<void> {
         try {
+            Logger.info(`Creating client for ${tokenConfig.ownerId}`);
+
             const client = new Client();
+
+            client.removeAllListeners();
+
             const commandHandler = new CommandHandler(client, {
                 ...this.config,
-                botSettings: {
-                    ...this.config.botSettings,
-                    token: tokenConfig.token
-                },
-                generalSettings: {
-                    ...this.config.generalSettings,
-                    ownerId: tokenConfig.ownerId
+                tokens: [tokenConfig]
+            });
+
+            let isReady = false;
+
+            client.once('ready', async () => {
+                if (isReady) return;
+                isReady = true;
+                
+                Logger.info(`Client logged in as ${client.user?.tag}`);
+                try {
+                    await commandHandler.loadCommands();
+                    this.clients.set(tokenConfig.ownerId, client);
+                    this.commandHandlers.set(tokenConfig.ownerId, commandHandler);
+                } catch (error) {
+                    Logger.error(`Failed to load commands: ${(error as Error).message}`);
                 }
             });
-    
-            (client as any).commandHandler = commandHandler;
-    
-            await commandHandler.loadCommands();
-            
+
             client.on('messageCreate', async (message) => {
+                if (!isReady) return;
+                if (message.author.id !== tokenConfig.ownerId) return;
+
                 try {
                     await commandHandler.handleCommand(message);
                 } catch (error) {
                     Logger.error(`Error handling message: ${(error as Error).message}`);
                 }
             });
+
+            client.on('messageDelete', (message: Message | PartialMessage) => {
+                try {
+                    if (message.partial || message.author?.bot) return;
             
-            this.clients.set(tokenConfig.token, client);
-            this.commandHandlers.set(tokenConfig.token, commandHandler);
+                    MessageStore.getInstance().storeMessage(
+                        tokenConfig.ownerId,
+                        message.channel.id,
+                        message as Message
+                    );
+                } catch (error) {
+                    Logger.error(`Error handling deleted message: ${(error as Error).message}`);
+                }
+            });
+
+            Logger.info(`Attempting to login for ${tokenConfig.ownerId}...`);
+
+            initRPCHandler(client);
+            initAutoReactHandler(client, tokenConfig, true);
             
             await client.login(tokenConfig.token);
-            
-            Logger.info(`Client Initialized for owner ${tokenConfig.ownerId}`);
+
         } catch (error) {
-            Logger.error(`Failed to Initialize client: ${(error as Error).message}`);
+            Logger.error(`Failed to initialize client: ${(error as Error).message}`);
             throw error;
         }
     }
 
-    public async reloadClients(): Promise<void> {
-        try {
-            if (this.configMonitor) {
-                this.configMonitor.stopMonitoring();
+    public async destroyAll(): Promise<void> {
+        for (const [userId, client] of this.clients) {
+            try {
+                Logger.info(`Destroying client for ${userId}`);
+                
+                if (client.readyAt) {
+                    client.removeAllListeners();
+                    await client.destroy();
+                }
+                
+            } catch (error) {
+                Logger.error(`Error destroying client: ${(error as Error).message}`);
             }
+        }
+        this.clients.clear();
+        this.commandHandlers.clear();
+        this.hasInitialized = false;
+        Logger.info('All clients destroyed successfully');
+    }
 
-            await this.destroy();
+    public getClientByUserId(userId: string): Client | undefined {
+        return this.clients.get(userId);
+    }
 
-            this.clients.clear();
-            this.commandHandlers.clear();
+    public getCommandHandlerByUserId(userId: string): CommandHandler | undefined {
+        return this.commandHandlers.get(userId);
+    }
 
-            await this.Initialize();
-            
-            Logger.info('All clients reloaded successfully');
+    public async reload(newConfig: Config): Promise<void> {
+        try {
+            Logger.info('Reloading clients with new config...');
+            this.config = newConfig;
+            await this.destroyAll();
+            await this.initialize();
+            Logger.info('Clients reloaded successfully');
         } catch (error) {
             Logger.error(`Failed to reload clients: ${(error as Error).message}`);
             throw error;
         }
-    }
-
-    public getClientByToken(token: string): Client | undefined {
-        return this.clients.get(token);
-    }
-
-    public getClientByOwner(ownerId: string): Client | undefined {
-        for (const [token, client] of this.clients.entries()) {
-            const tokenConfig = this.config.tokens.find(t => t.token === token);
-            if (tokenConfig && tokenConfig.ownerId === ownerId) {
-                return client;
-            }
-        }
-        return undefined;
-    }
-
-    public async destroy(): Promise<void> {
-        if (this.configMonitor) {
-            this.configMonitor.stopMonitoring();
-            this.configMonitor = null;
-        }
-
-        for (const client of this.clients.values()) {
-            await client.destroy();
-        }
-        
-        this.clients.clear();
-        this.commandHandlers.clear();
-        Logger.info('All clients destroyed successfully');
-    }
-
-    public isUserAllowed(userId: string, token: string): boolean {
-        const tokenConfig = this.config.tokens.find(t => t.token === token);
-        if (!tokenConfig) return false;
-        if (userId === tokenConfig.ownerId) return true;
-        return tokenConfig.allowedUsers?.includes(userId) || false;
     }
 }

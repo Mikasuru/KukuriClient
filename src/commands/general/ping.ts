@@ -1,30 +1,26 @@
-import { Message, Client, WebEmbed } from 'discord.js-selfbot-v13';
+import { Message, Client } from 'discord.js-selfbot-v13';
 import { Command } from '../../interfaces';
 
 const command: Command = {
     name: 'ping',
-    description: 'Check bot latency and API response time',
+    description: 'Check bot\'s latency and performance',
     category: 'General',
     aliases: ['p', 'latency'],
-    cooldown: 3,
+    cooldown: 1,
+    usage: 'ping',
     
-    async execute(message: Message, args: string[], client: Client): Promise<Message> {
-        const sent = await message.channel.send('Pinging...');
-        const ping = Math.round(client.ws.ping);
-        const latency = sent.createdTimestamp - message.createdTimestamp;
-
-        const embed = new WebEmbed()
-            .setTitle('🏓 Ping Information')
-            .setDescription(`
-**Client**: ${latency}ms
-**API**: ${ping}ms`)
-            .setColor('#00ff00');
-
-        await sent.delete();
+    async execute(message: Message, args: string[], client: Client): Promise<void> {
+        const startTime = Date.now();
+        const sent = await message.channel.send('```css\n[ 📡 ] Checking Ping...```');
         
-        return message.channel.send({
-            content: `${WebEmbed.hiddenEmbed}${embed}`
-        });
+        const latency = sent.createdTimestamp - message.createdTimestamp;
+        const apiLatency = Math.round(client.ws.ping);
+        
+        await sent.edit(
+            `\`\`\`css\n[ 🏓 PING STATS ]\n` +
+            `📡 Latency: ${latency}ms\n` +
+            `🤖 API Latency: ${apiLatency}ms\`\`\``
+        );
     }
 };
 
