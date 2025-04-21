@@ -1,6 +1,10 @@
 <h1 align="center">Kukuri Client</h1>
 <p align="center">
-  <i>A free and open-source Discord selfbot with powerful features and control via CLI.</i>
+  <i>A free and open-source Discord selfbot with powerful features</i>
+</p>
+<p align="center">
+  <img src="https://img.shields.io/github/stars/Mikasuru/KukuriClient?style=social" alt="GitHub stars" />
+  <img src="https://img.shields.io/github/license/Mikasuru/KukuriClient" alt="License" /> 
 </p>
 
 ---
@@ -8,7 +12,6 @@
 <h2 align="center">✨Community</h2>
 <p align="center">
   Hey! I've create a Community server, Feel free to join! <br />
-  Also, I provided a free hosting too! <br />
   If you have some issue, You can join my discord server.<br />
   <a href="https://discord.gg/bxMjzEXgZR">Kukuri Client | Community</a>
 </p>
@@ -29,22 +32,23 @@
 
 ---
 
-<h2>📚 Getting Started</h2>
-<p>Follow these steps to set up the Kukuri Client:</p>
-
-<h3>Setup Process:</h3>
-<p>Install the packages:</p>
+<h2>📦 Getting Started</h2>
+<h3>1️⃣ Install Dependencies</h3>
 <pre>
 bun install
 </pre>
 
-<p>Starting Kukuri Client:</p>
+<h3>2️⃣ Setting up</h3>
 <pre>
-bun run start
+bun run token
+</pre>
+
+<h3>3️⃣ Run Kukuri Client</h3>
+<pre>
+bun run cli
 </pre>
 
 <h2>🤝 Contributing</h2>
-<p>I welcome contributions to improve Kukuri Client!<br />However, all contributions must undergo a review process before being merged.</p>
+<p> Contributions are always welcome! If you have improvements, bug fixes, or new features in mind, feel free to submit a pull request. All contributions will go through a short review before being merged. </p>
 
-<h2>💖 Supporting</h2>
-<p>You can support the development of Kukuri Client by:</p> <ul> <li>Subscribing to my channel: <a href="https://www.youtube.com/@kukuri_xyz">My channel</a></li> <li>Starring this repository</li> </ul>
+<h2>💖 Support the Project</h2> <p>You can help Kukuri Client grow by:</p> <ul> <li>⭐ Starring this repository on GitHub</li> <li>📺 Subscribing to my channel: <a href="https://www.youtube.com/@kukuri_xyz">YouTube - @kukuri_xyz</a></li> </ul>
