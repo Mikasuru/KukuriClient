@@ -9,7 +9,7 @@ type TokenData = {
   prefix: string;
   token: string;
   allowUsers: string[] | "all";
-  allowEveryone: boolean;
+  // allowEveryone: boolean;
 };
 
 const tokens = Object.values(TokenConfig).map(
@@ -28,8 +28,7 @@ const bots: ClientInit[] = [];
 for (const tokenData of Object.values(TokenConfig)) {
   const bot = new ClientInit(
     tokenData.prefix,
-    tokenData.allowUsers,
-    tokenData.allowEveryone,
+    tokenData.allowUsers
   );
   bot.start(tokenData.token);
   bots.push(bot);
