@@ -12,7 +12,7 @@
 <p align="center">
   Hey! I've create a Community server, Feel free to join! <br />
   If you have some issue, You can join my discord server.<br />
-  <a href="https://discord.gg/bxMjzEXgZR">Kukuri Client | Community</a>
+  <a href="https://discord.gg/HR4q37dJgs">Kukuri Client | Community (New)</a>
 </p>
 
 ---
