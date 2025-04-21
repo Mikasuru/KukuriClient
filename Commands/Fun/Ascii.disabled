@@ -1,0 +1,101 @@
+// Im headache with this command.
+import { Client, Message } from "discord.js-selfbot-v13";
+import axios from "axios";
+import sharp from "sharp";
+
+const Chars = " .,:;i1tfLCG08@";
+
+export default {
+  name: "ascii",
+  description: "Convert anime character image to special ASCII art",
+  usage: 'ascii anime <character name>\nExample: !ascii anime "Yue"',
+  execute: async (client: Client, message: Message, args: string[]) => {
+    try {
+      if (args.length < 2 || args[0].toLowerCase() !== "anime") {
+        await message.reply(
+          '```\nUsage: !ascii anime <character name>\nExample: !ascii anime "Yue"\n```',
+        );
+        return;
+      }
+
+      const CharName = args.slice(1).join(" ");
+      const StatusMsg = await message.reply(
+        "```\n🔍 Searching for character...\n```",
+      );
+
+      const query = `
+                query ($search: String) {
+                    Character(search: $search) {
+                        image {
+                            large
+                        }
+                        name {
+                            full
+                        }
+                    }
+                }
+            `;
+
+      const FuckingRes = await axios.post("https://graphql.anilist.co", {
+        query,
+        variables: { search: CharName },
+      });
+
+      const ImgURL = FuckingRes.data?.data?.Character?.image?.large;
+      const FullName = FuckingRes.data?.data?.Character?.name?.full;
+
+      if (!ImgURL) {
+        await StatusMsg.edit("```\nCharacter not found\n```");
+        return;
+      }
+
+      await StatusMsg.edit("```\n🎨 Converting image to ASCII art...\n```");
+
+      const ImgRes = await axios.get(ImgURL, {
+        responseType: "arraybuffer",
+      });
+      const ImageBuff = Buffer.from(ImgRes.data);
+
+      const ihatethis = 75;
+      const godhelpme = Math.floor(ihatethis * 0.5);
+
+      const PleaseProcess = await sharp(ImageBuff)
+        .resize(ihatethis, godhelpme, { fit: "fill", position: "center" })
+        .grayscale()
+        .normalize()
+        .raw()
+        .toBuffer();
+
+      let FuckingArt = "";
+      for (let y = 0; y < godhelpme; y++) {
+        let row = "";
+        for (let x = 0; x < ihatethis; x++) {
+          const pixel = PleaseProcess[y * ihatethis + x];
+          const CharIndex = Math.floor((pixel / 255) * (Chars.length - 1));
+          row += Chars[CharIndex];
+        }
+        FuckingArt += row + "\n";
+      }
+
+      const FinallyAResult = [
+        "```",
+        `Character: ${FullName}`,
+        "═".repeat(40),
+        FuckingArt,
+        "```",
+      ].join("\n");
+
+      if (FinallyAResult.length > 4000) {
+        await StatusMsg.edit(
+          "```\nGenerated ASCII art is too large for Discord\n```",
+        );
+        return;
+      }
+
+      await StatusMsg.edit(FinallyAResult);
+    } catch (error) {
+      console.error(`Error in ascii command: ${(error as Error).message}`);
+      await message.reply("```\nAn error occurred\n```");
+    }
+  },
+};

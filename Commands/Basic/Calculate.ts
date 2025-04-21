@@ -1,26 +1,32 @@
-import { Client, Message } from "discord.js-selfbot-v13";
+import { Message } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
+import { Logger } from "../../Utils/Logger";
+import { SendTempRep, CodeBlock } from "../../Utils/MessageUtils";
 
 export default {
   name: "calculate",
-  description: "Calculates a simple math expression.",
+  description: "Calculates a simple math expression (use with caution).",
   usage: "calculate <expression>",
-  execute: (client: Client, message: Message, args: string[]) => {
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
+
     if (args.length === 0) {
-      return message.reply(
-        "Please provide a math expression. Usage: `!calculate <expression>`",
-      );
+      await SendTempRep(message, `Please provide a math expression. Usage: ${client.prefix}${exports.default.usage}`);
+      return;
     }
 
-    const Expression = args.join(" ");
+    const expression = args.join(" ");
+
     try {
-      const result = eval(Expression);
+      const result = eval(expression);
+
       if (typeof result === "number" && !isNaN(result)) {
-        message.reply(`Result: \`${result}\``);
+        await message.reply(`Result: ${CodeBlock(result.toString())}`);
       } else {
-        message.reply("Invalid math expression.");
+        await SendTempRep(message, "Invalid math expression or result is not a number.");
       }
-    } catch (error) {
-      message.reply("Error calculating expression. Please check your input.");
+    } catch (evalError) {
+      Logger.error(`Eval error in calculate command: ${evalError}`);
+      await SendTempRep(message, "Error calculating expression. Please check your input.");
     }
   },
 };

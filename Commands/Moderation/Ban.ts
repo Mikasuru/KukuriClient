@@ -1,31 +1,35 @@
-import { Client, Message } from "discord.js-selfbot-v13";
-import { Logger } from "../../Utils/Logger";
+import { Message } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
+import { EnsureGC, ParseMbr, CheckBanable } from "../../Utils/DiscordUtils";
+import { HandleError } from "../../Utils/ErrorUtils";
+import { SafeDelCmd, SendTempRep } from "../../Utils/MessageUtils";
 
 export default {
   name: "ban",
   description: "Ban a member from the server",
-  usage: "ban [@user] [reason]",
-  execute: async (client: Client, message: Message, args: string[]) => {
+  usage: "ban <@user/userid> [reason]",
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
     try {
-      const Mem = message.mentions.members?.first();
-      if (!Mem) {
-        await message.reply("Please mention a valid member.");
-        return;
+      if (!await EnsureGC(message)) return;
+
+      const memberToBan = await ParseMbr(message, args[0]);
+      if (!memberToBan) {
+          await SendTempRep(message, `Invalid user mention or ID. Usage: ${client.prefix}${exports.default.usage}`);
+          return;
       }
 
-      if (!Mem.bannable) {
-        await message.reply("I cannot ban this member.");
-        return;
-      }
+      if (!await CheckBanable(message, memberToBan)) return;
 
       const reason = args.slice(1).join(" ") || "No reason provided";
-      await Mem.ban({ reason });
+      await memberToBan.ban({ reason });
+
       await message.channel.send(
-        `✅ Banned ${Mem.user.tag} | Reason: ${reason}`,
+        `Banned ${memberToBan.user.tag} | Reason: ${reason}`
       );
+      SafeDelCmd(message);
+
     } catch (error) {
-      Logger.error(`Error in ban command: ${error}`);
-      await message.reply("Failed to ban member.");
+      await HandleError(error, exports.default.name, message, "Failed to ban member.");
     }
   },
 };

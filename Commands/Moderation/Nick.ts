@@ -1,96 +1,76 @@
-import { Client, Message } from "discord.js-selfbot-v13";
+import { Message, GuildMember } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
 import { Logger } from "../../Utils/Logger";
+import { EnsureGC, ParseMbr, CheckManageable } from "../../Utils/DiscordUtils";
+import { getRandomElement } from "../../Utils/MiscUtils";
+import { SendTempRep, CodeBlock } from "../../Utils/MessageUtils";
+import { HandleError } from "../../Utils/ErrorUtils";
+
+const adjectives = ["Sigma", "Maxxing", "Alpha", "Skibidi", "Ohio", "Rizzler"];
+const nouns = ["Toilet", "Skibidi", "Wolf", "Kukuri"]; // Fun names
 
 export default {
   name: "nick",
   description: "Manage user nicknames",
-  usage: "nick <set/reset/random> <@user> [nickname]",
-  execute: async (client: Client, message: Message, args: string[]) => {
+  usage: "nick <set|reset|random> <@user/userid> [nickname]",
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
     try {
-      if (!message.guild) {
-        await message.reply("This command can only be used in a server");
-        return;
-      }
+      if (!await EnsureGC(message)) return;
 
-      if (!args[0]) {
-        await message.reply(
-          "Usage:\n" +
-            "!nick set @user [nickname] - Set user's nickname\n" +
-            "!nick reset @user - Reset user's nickname\n" +
-            "!nick random @user - Set random nickname",
+      const action = args[0]?.toLowerCase();
+      const targetArg = args[1];
+      const potentialNick = args.slice(2).join(" ");
+
+      if (!action || !targetArg || (action === "set" && !potentialNick)) {
+        await SendTempRep(message, CodeBlock(
+            `Invalid arguments. Usage:\n`+
+            `${client.prefix}nick set <@user/userid> <nickname>\n` +
+            `${client.prefix}nick reset <@user/userid>\n` +
+            `${client.prefix}nick random <@user/userid>`
+            )
         );
         return;
       }
 
-      const action = args[0].toLowerCase();
-      const member = message.mentions.members?.first();
-
+      const member = await ParseMbr(message, targetArg);
       if (!member) {
-        await message.reply("Please mention a user");
-        return;
+           await SendTempRep(message, `Could not find the specified member.`);
+           return;
       }
 
-      if (!member.manageable) {
-        await message.reply("I cannot manage this user's nickname");
-        return;
-      }
+      if (!await CheckManageable(message, member, 'change nickname for')) return;
 
       switch (action) {
         case "set": {
-          const newNick = args.slice(2).join(" ");
-          if (!newNick) {
-            await message.reply("Please provide a new nickname");
+          if (potentialNick.length > 32) {
+            await SendTempRep(message, "Nickname must be 32 characters or less.");
             return;
           }
-
-          if (newNick.length > 32) {
-            await message.reply("Nickname must be 32 characters or less");
-            return;
-          }
-
-          await member.setNickname(newNick);
-          await message.channel.send(
-            `Changed ${member.user.username}'s nickname to ${newNick}`,
-          );
+          await member.setNickname(potentialNick);
+          await SendTempRep(message, `Changed ${member.user.username}'s nickname to "${potentialNick}".`);
           break;
         }
-
         case "reset": {
           const oldNick = member.nickname;
           await member.setNickname(null);
-          await message.channel.send(
-            `Reset ${member.user.username}'s nickname ${oldNick ? `from ${oldNick}` : ""}`,
-          );
+           await SendTempRep(message, `Reset ${member.user.username}'s nickname${oldNick ? ` from "${oldNick}"` : ""}.`);
           break;
         }
-
         case "random": {
-          const adjectives = [
-            "Sigma",
-            "Maxxing",
-            "Alpha",
-            "Skibidi",
-            "Ohio",
-            "Rizzler",
-          ];
-          const nouns = ["Toilet", "Skibidi", "Wolf", "Kukuri"];
-          const randomNick = `${adjectives[Math.floor(Math.random() * adjectives.length)]} ${
-            nouns[Math.floor(Math.random() * nouns.length)]
-          }`;
+          const randomAdj = getRandomElement(adjectives) || "Cool";
+          const randomNoun = getRandomElement(nouns) || "User";
+          const randomNick = `${randomAdj} ${randomNoun}`;
           await member.setNickname(randomNick);
-          await message.channel.send(
-            `Changed ${member.user.username}'s nickname to ${randomNick}`,
-          );
+           await SendTempRep(message, `Changed ${member.user.username}'s nickname to "${randomNick}".`);
           break;
         }
-
         default: {
-          await message.reply("Invalid action. Use !nick for help");
+          await SendTempRep(message, `Invalid action "${action}". Use 'set', 'reset', or 'random'.`);
         }
       }
+
     } catch (error) {
-      Logger.error(`Error in nick command: ${error}`);
-      await message.reply("An error occurred while managing nickname");
+      await HandleError(error, exports.default.name, message, "An error occurred while managing nickname.");
     }
   },
 };

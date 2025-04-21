@@ -1,85 +1,95 @@
-import { Client, Message, DMChannel } from "discord.js-selfbot-v13";
+import { Message, DMChannel } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
 import { Logger } from "../../Utils/Logger";
+import { ParseUsr } from "../../Utils/DiscordUtils";
+import { SendEditRep, FetchChMsg, SafeDelMsg, CodeBlock } from "../../Utils/MessageUtils";
+import { HandleError } from "../../Utils/ErrorUtils";
+import { delay } from "../../Utils/MiscUtils";
 
 export default {
   name: "deletedm",
-  description: "Delete messages in DMs with a user or all users",
-  usage: "deletedm <@user/userid/all>",
-  execute: async (client: Client, message: Message, args: string[]) => {
+  description: "Delete your messages in DMs with a user or all users",
+  usage: "deletedm <@user/userid | all>", 
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
+    let editMessage: Message | null = null;
     try {
       if (!args[0]) {
-        await message.reply(
-          "Usage: !deletedm <@user/userid/all>\nExample: !deletedm @user or !deletedm all",
-        );
+        await message.reply(CodeBlock(`Usage: ${client.prefix}${exports.default.usage}\nExample: ${client.prefix}deletedm @user or ${client.prefix}deletedm all`));
         return;
       }
 
-      if (args[0].toLowerCase() === "all") {
-        const Msg = await message.channel.send(
-          "🗑️ Deleting all previous DMs...",
-        );
-        const DMChannels = client.channels.cache.filter(
-          (channel) => channel instanceof DMChannel,
-        );
-        let DelCount = 0;
+      const targetArg = args[0].toLowerCase();
 
-        for (const [, channel] of DMChannels) {
-          try {
-            const messages = await (channel as DMChannel).messages.fetch();
+      if (targetArg === "all") {
+        editMessage = await SendEditRep(message, "Deleting all your previous DM messages...");
+        if (!editMessage) return;
+
+        const dmChannels = client.channels.cache.filter(
+          (channel): channel is DMChannel => channel instanceof DMChannel // Type guard
+        );
+        let totalDeletedCount = 0;
+        let checkedChannels = 0;
+
+        for (const [, channel] of dmChannels) {
+            checkedChannels++;
+            const messages = await FetchChMsg(channel, 100);
+            if (messages) {
+                let deletedInChannel = 0;
+                for (const msg of messages.values()) {
+                    if (msg.author.id === client.user?.id) {
+                        await SafeDelMsg(msg);
+                        deletedInChannel++;
+                        totalDeletedCount++;
+                        await delay(150); // Small delay
+                    }
+                }
+                 if (deletedInChannel > 0) {
+                     Logger.log(`Deleted ${deletedInChannel} messages in DM with ${channel.recipient?.tag || 'Unknown User'}`);
+                 }
+            }
+             if (checkedChannels % 10 === 0) {
+                 await editMessage.edit(CodeBlock(`Checked ${checkedChannels}/${dmChannels.size} DMs... Deleted ${totalDeletedCount} messages so far...`));
+             }
+        }
+        await editMessage.edit(CodeBlock(`Finished deleting. Total messages deleted: ${totalDeletedCount}`));
+
+      } else {
+        const targetUser = await ParseUsr(client, args[0], message);
+         if (!targetUser || targetUser.id === message.author.id) {
+             await message.reply(CodeBlock("Invalid user mention or ID provided."));
+             return;
+         }
+
+        editMessage = await SendEditRep(message, `Deleting your messages in DM with ${targetUser.tag}...`);
+        if (!editMessage) return;
+
+         const dmChannel = client.channels.cache.find(
+            ch => ch instanceof DMChannel && ch.recipient?.id === targetUser.id
+         ) as DMChannel | undefined;
+
+        if (dmChannel) {
+          const messages = await FetchChMsg(dmChannel, 100);
+          let deletedCount = 0;
+          if (messages) {
             for (const msg of messages.values()) {
-              if (msg.author.id === client.user?.id && msg.deletable) {
-                await msg.delete();
-                DelCount++;
+              if (msg.author.id === client.user?.id) {
+                await SafeDelMsg(msg);
+                deletedCount++;
+                await delay(150); // Small delay
               }
             }
-          } catch (error) {
-            Logger.error(
-              `Error deleting messages in channel ${channel.id}: ${error}`,
-            );
           }
+          await editMessage.edit(CodeBlock(`Finished deleting. Deleted ${deletedCount} messages in DM with ${targetUser.tag}.`));
+        } else {
+          await editMessage.edit(CodeBlock(`Could not find an active DM channel with ${targetUser.tag} to delete messages from.`));
         }
-
-        await Msg.edit(
-          `✅ Successfully deleted ${DelCount} messages from all DM channels`,
-        );
-        return;
-      }
-
-      let TargetUser = message.mentions.users.first();
-      if (!TargetUser) {
-        try {
-          TargetUser = await client.users.fetch(args[0]);
-        } catch {
-          await message.reply("Invalid user ID or mention");
-          return;
-        }
-      }
-
-      const Msg = await message.channel.send(
-        `🗑️ Deleting DMs with ${TargetUser.tag}...`,
-      );
-      try {
-        const DMChannel = await TargetUser.createDM();
-        const messages = await DMChannel.messages.fetch();
-        let DelCount = 0;
-
-        for (const msg of messages.values()) {
-          if (msg.author.id === client.user?.id && msg.deletable) {
-            await msg.delete();
-            DelCount++;
-          }
-        }
-
-        await Msg.edit(
-          `✅ Successfully deleted ${DelCount} messages with ${TargetUser.tag}`,
-        );
-      } catch (error) {
-        Logger.error(`Error deleting DM messages: ${error}`);
-        await Msg.edit("Failed to delete DM messages");
       }
     } catch (error) {
-      Logger.error(`Error in deletedm command: ${error}`);
-      await message.reply("An error occurred while deleting DM messages");
+      const errorMsg = "An error occurred while deleting DM messages.";
+       if (editMessage) {
+           try { await editMessage.edit(CodeBlock(errorMsg)); } catch {}
+       }
+      await HandleError(error, exports.default.name, message, errorMsg);
     }
   },
 };

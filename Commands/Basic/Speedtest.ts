@@ -1,38 +1,65 @@
-import { Client, Message } from "discord.js-selfbot-v13";
+import { Message } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
 import axios from "axios";
+import { Logger } from "../../Utils/Logger";
+import { HandleError } from "../../Utils/ErrorUtils";
+import { SendEditRep, CodeBlock } from "../../Utils/MessageUtils";
 
 export default {
   name: "speedtest",
   description:
-    "Tests your internet download speed using a simple HTTP request.",
+    "Tests internet download speed using Cloudflare.",
   usage: "speedtest",
-  execute: async (client: Client, message: Message, args: string[]) => {
-    const TestMSG = await message.reply(
-      "Running internet speed test... Please wait.",
-    );
-
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
+    let editMessage: Message | null = null;
     try {
-      const StartTime = Date.now();
-      const Res = await axios.get(
-        "https://speed.cloudflare.com/__down?bytes=10000000",
+      editMessage = await SendEditRep(message, "Running internet speed test... Please wait.");
+      if (!editMessage) {
+          Logger.error("Failed to send initial speedtest message.");
+          return;
+      }
+
+      const startTime = Date.now();
+      const response = await axios.get(
+        "https://speed.cloudflare.com/__down?bytes=50000000", // 50MB
         {
           responseType: "arraybuffer",
+          timeout: 20000,
         },
       );
-      const EndPlease = Date.now();
+      const endTime = Date.now();
 
-      const TimeTaken = (EndPlease - StartTime) / 1000;
-      const ASize = 10;
-      const DownloadSpeed = ((ASize * 8) / TimeTaken).toFixed(2); // Mbps
+      const durationSeconds = (endTime - startTime) / 1000;
+      const sizeMegabits = (response.data.byteLength / (1024 * 1024)) * 8;
 
-      await TestMSG.edit(
-        `**Internet Speed Test Results:**\n` +
-          `- Download: \`${DownloadSpeed} Mbps\`\n` +
-          `- Note: Upload and Ping tests are not available in this mode.`,
-      );
+      if (durationSeconds === 0) {
+          await editMessage.edit(CodeBlock("Speed test duration too short, unable to calculate speed."));
+          return;
+      }
+
+      const downloadSpeedMbps = (sizeMegabits / durationSeconds).toFixed(2); // Mbps
+
+      const resultText =
+        `📊 Internet Speed Test Results (Cloudflare):\n\n` +
+        `- Download: ${downloadSpeedMbps} Mbps\n` +
+        `- Time Taken: ${durationSeconds.toFixed(2)} s\n` +
+        `- Data Size: ${(sizeMegabits / 8).toFixed(2)} MB\n\n` +
+        `Note: Upload/Ping tests not available.`;
+
+      await editMessage.edit(CodeBlock(resultText));
+
     } catch (error) {
-      await TestMSG.edit("Failed to run speed test. Check your connection.");
-      console.error("Speedtest error:", error);
+       const errorMsg = `Failed to run speed test. Check connection or Cloudflare status.`;
+       if (editMessage) {
+           try {
+               await editMessage.edit(CodeBlock(errorMsg));
+           } catch (editError) {
+                await HandleError(error, exports.default.name, message, errorMsg);
+           }
+       } else {
+            await HandleError(error, exports.default.name, message, errorMsg);
+       }
+       Logger.error(`Speedtest error: ${error}`);
     }
   },
 };

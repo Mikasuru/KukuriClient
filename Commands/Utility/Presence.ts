@@ -1,85 +1,85 @@
-import { Client, Message } from "discord.js-selfbot-v13";
+import { Message } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
 import { Logger } from "../../Utils/Logger";
+import { SendTempRep, CodeBlock } from "../../Utils/MessageUtils";
+import { HandleError } from "../../Utils/ErrorUtils";
 
-const ActivityType = {
-  PLAYING: "PLAYING",
-  STREAMING: "STREAMING",
-  LISTENING: "LISTENING",
-  WATCHING: "WATCHING",
-  CUSTOM: "CUSTOM",
-  COMPETING: "COMPETING",
-  HANG: "HANG",
-} as const;
+const VaildActTypes = [
+  "PLAYING", "STREAMING", "LISTENING", "WATCHING", "CUSTOM", "COMPETING"
+] as const;
+type ActivityType = typeof VaildActTypes[number];
 
-export default {
+const VaildPlatforms = [
+  "desktop", "web", "mobile"
+] as const;
+type PlatformType = typeof VaildPlatforms[number];
+
+const VaildStatus = ["online", "idle", "dnd"] as const;
+type StatusType = typeof VaildStatus[number];
+
+const commandDefinition = {
   name: "presence",
-  description: "Change your presence",
-  usage: "!presence <type> <platform> <status> <name>",
-  execute: async (client: Client, message: Message, args: string[]) => {
+  description: "Change your Discord presence (status, activity, platform).",
+  usage: "presence <type> <platform> <status> <name...> | presence stop",
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
+    const commandName = commandDefinition.name;
     try {
       if (args.length === 1 && args[0].toLowerCase() === "stop") {
-        client.user.setPresence({
-          activities: [{ name: "Kukuri Client", type: "HANG" }],
-          status: "online",
-        });
-        message.reply("Your presence have been disabled");
+        try {
+          client.user?.setPresence({
+             activities: [],
+             status: "online",
+          });
+          await SendTempRep(message, "✅ Custom presence stopped (reset to default/online).");
+        } catch (presenceError) {
+             Logger.error(`Failed to stop presence: ${presenceError}`);
+             await SendTempRep(message, "⚠️ Could not fully reset presence, but cleared settings.");
+        }
         return;
       }
 
       if (args.length < 4) {
-        return message.reply(
-          "Usage: !presence <type> <platform> <status> <name>",
-        );
+        await SendTempRep(message, CodeBlock(`Invalid arguments. Usage: ${client.prefix}${commandDefinition.usage}`));
+        return;
       }
 
-      const Type = args[0].toUpperCase();
-      const Platform = args[1].toLowerCase();
-      const Status = args[2].toLowerCase();
-      const Name = args.slice(3).join(" ");
+      const typeArg = args[0].toUpperCase();
+      const platformArg = args[1].toLowerCase();
+      const statusArg = args[2].toLowerCase();
+      const name = args.slice(3).join(" ");
 
-      const VaildTypes = Object.keys(ActivityType);
-      const VaildPF = [
-        "desktop",
-        "samsung",
-        "xbox",
-        "ios",
-        "android",
-        "embedded",
-        "ps4",
-        "ps5",
-      ];
-      const VaildStatus = ["online", "idle", "dnd"];
-
-      if (!VaildTypes.includes(Type)) {
-        return message.reply(
-          `Invalid type. Available types: ${VaildTypes.join(", ")}`,
-        );
+      if (!(VaildActTypes as ReadonlyArray<string>).includes(typeArg)) {
+          await SendTempRep(message, CodeBlock(`Invalid type "${typeArg}".\nAvailable: ${VaildActTypes.join(", ")}`));
+          return;
       }
+      const type = typeArg as ActivityType;
 
-      if (!VaildPF.includes(Platform)) {
-        return message.reply(
-          `Invalid platform. Available platforms: ${VaildPF.join(", ")}`,
-        );
+      if (!(VaildPlatforms as ReadonlyArray<string>).includes(platformArg)) {
+          await SendTempRep(message, CodeBlock(`Invalid platform "${platformArg}".\nAvailable: ${VaildPlatforms.join(", ")}`));
+          return;
       }
+       const platform = platformArg as PlatformType;
 
-      if (!VaildStatus.includes(Status)) {
-        return message.reply(
-          `Invalid status. Available statuses: online, idle, dnd`,
-        );
+      if (!(VaildStatus as ReadonlyArray<string>).includes(statusArg)) {
+           await SendTempRep(message, CodeBlock(`Invalid status "${statusArg}".\nAvailable: ${VaildStatus.join(", ")}`));
+          return;
       }
+       const status = statusArg as StatusType;
 
-      client.user.setPresence({
-        activities: [{ name: Name, type: Type as keyof typeof ActivityType }],
-        status: Status as "online" | "idle" | "dnd",
-        platform: Platform,
+      client.user?.setPresence({
+        activities: [{
+            name: name,
+            type: type as any,
+        }],
+        status: status,
       });
 
-      message.reply(
-        `Presence updated to **${Type}** on **${Platform}** with **${Status}** status and name **${Name}**!`,
-      );
+      await SendTempRep(message, `Presence updated: ${type} "${name}" on ${platform} (${status})`);
+
     } catch (error) {
-      Logger.error(`Presence error: ${error}`);
-      message.reply("An error occurred while updating presence.");
+      await HandleError(error, commandName, message, "An error occurred while updating presence.");
     }
   },
 };
+
+export default commandDefinition;

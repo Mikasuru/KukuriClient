@@ -1,107 +1,106 @@
-import { Client, Message } from "discord.js-selfbot-v13";
+import { Message } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
 import si from "systeminformation";
 import os from "os";
+import { Logger } from "../../Utils/Logger";
+import { CodeBlock } from "../../Utils/MessageUtils";
+import { HandleError } from "../../Utils/ErrorUtils";
 
-async function GPU(): Promise<string> {
+async function getGpuInfo(): Promise<string> {
   try {
-    const GPUData = await si.graphics();
-    return (
-      GPUData.controllers
-        .map((gpu) => `\n${gpu.vendor} ${gpu.model}`)
-        .join(", ") || "No GPU detected"
-    );
+    const gpuData = await si.graphics();
+    if (gpuData && gpuData.controllers && gpuData.controllers.length > 0) {
+        return gpuData.controllers
+            .map((gpu) => `${gpu.vendor || ''} ${gpu.model || 'Unknown GPU'}`.trim())
+            .join(", ") || "N/A";
+    }
+    return "No GPU detected";
   } catch (error) {
+    Logger.warn(`Could not detect GPU: ${error}`);
     return "Unable to detect GPU";
   }
 }
 
+function getHostingType(): string {
+  const hostname = os.hostname().toLowerCase();
+  const virtualizationKeywords = ["vps", "vm", "cloud", "aws", "gcp", "azure", "kvm", "qemu", "virtualbox", "vmware", "hyper-v", "docker", "container"];
+
+  if (virtualizationKeywords.some((keyword) => hostname.includes(keyword) || (os.version && os.version().toLowerCase().includes(keyword)))) {
+      return "Virtual Environment / Cloud / VPS";
+  }
+  return "Local Machine / Unknown";
+}
+
+
 export default {
   name: "information",
-  description: "Get detailed information about the bot.",
+  description: "Get detailed information about the client and system.",
   usage: "information",
-  execute: async (client: Client, message: Message, args: string[]) => {
-    // Uptime Calculation
-    const StartTime =
-      process.uptime() === 0
-        ? Date.now()
-        : Date.now() - process.uptime() * 1000;
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
+    try {
+      // Uptime Calculation
+      const uptimeSeconds = process.uptime();
+      const days = Math.floor(uptimeSeconds / (3600 * 24));
+      const hours = Math.floor((uptimeSeconds % (3600 * 24)) / 3600);
+      const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+      const seconds = Math.floor(uptimeSeconds % 60);
+      const uptimeString = `${days}d ${hours}h ${minutes}m ${seconds}s`;
 
-    const MS = Date.now() - StartTime;
-    const Sec = Math.floor(MS / 1000);
-    const Min = Math.floor(Sec / 60);
-    const Hrs = Math.floor(Min / 60);
-    const Days = Math.floor(Hrs / 24);
-    const UptimeString = `${Days}d ${Hrs % 24}h ${Min % 60}m ${Sec % 60}s`;
+      // System Info
+      const bunVersion = typeof Bun !== 'undefined' ? Bun.version : "N/A"; // Check if Bun exists
+      const platform = os.platform();
+      const release = os.release();
+      const arch = os.arch();
 
-    // System Info
-    const BunVer = Bun.version || "Unknown";
-    const Platform = os.platform();
-    const Release = os.release();
-    const Archbtw = os.arch();
+      // Memory
+      const totalMemGB = (os.totalmem() / 1024 ** 3).toFixed(2);
+      const freeMemGB = (os.freemem() / 1024 ** 3).toFixed(2);
 
-    // Memory
-    const TolMem = (os.totalmem() / 1024 ** 3).toFixed(2); // GB
-    const FrrrMem = (os.freemem() / 1024 ** 3).toFixed(2); // GB
+      // CPU Info
+      const cpus = os.cpus();
+      const cpuModel = cpus.length > 0 ? cpus[0].model : "N/A";
+      const cpuCores = cpus.length;
+      const cpuSpeed = cpus.length > 0 ? (cpus[0].speed / 1000).toFixed(2) : "N/A"; // Current speed
 
-    // CPU Info
-    const Cores = os.cpus().length;
-    const Model = os.cpus()[0].model;
+      let cpuMaxSpeed = "N/A";
+      try {
+          const cpuData = await si.cpu();
+          cpuMaxSpeed = cpuData.speedMax ? cpuData.speedMax.toFixed(2) : cpuSpeed;
+      } catch (siError) {
+          Logger.warn(`Could not get max CPU speed from systeminformation: ${siError}`);
+          cpuMaxSpeed = cpuSpeed;
+      }
 
-    const CData = await si.cpu();
-    const CSpeed = (os.cpus()[0].speed / 1000).toFixed(2); // Curr speed
-    const CMSpeed = (CData.speedMax || CSpeed).toFixed(2); // Max speed
 
-    const GInfo = await GPU();
-    const Hosting = GetHosting();
+      const gpuInfo = await getGpuInfo();
+      const hostingType = getHostingType();
 
-    const InfoMsg = `
-\`\`\`
-${client.user?.tag || "Unknown"}'s Information:
+      const infoContent = `
+Client User: ${client.user?.tag || "Unknown"}
 
 [ BOT STATUS ]
-- Uptime: ${UptimeString}
-- Bun Version: ${BunVer}
+- Uptime       : ${uptimeString}
+- Bun Version  : ${bunVersion}
 
-[ SYSTEM INFORMATION ]
-- OS Platform: ${Platform}
-- OS Release: ${Release}
-- Architecture: ${Archbtw}
-- Hosting Type: ${Hosting}
+[ SYSTEM INFO ]
+- OS Platform  : ${platform}
+- OS Release   : ${release}
+- Architecture : ${arch}
+- Hosting Type : ${hostingType}
 
 [ HARDWARE ]
-- CPU Model: ${Model}
-- CPU Cores: ${Cores}
-- CPU Speed: ${CSpeed} GHz (Max: ${CMSpeed} GHz)
-- GPU(s): ${GInfo}
-- Total Memory: ${TolMem} GB
-- Free Memory: ${FrrrMem} GB
-\`\`\`
-    `;
+- CPU Model    : ${cpuModel}
+- CPU Cores    : ${cpuCores}
+- CPU Speed    : ${cpuSpeed} GHz (Max: ${cpuMaxSpeed} GHz)
+- GPU(s)       : ${gpuInfo}
+- Total Memory : ${totalMemGB} GB
+- Free Memory  : ${freeMemGB} GB
+      `;
 
-    await message.reply(InfoMsg);
+      await message.reply(CodeBlock(infoContent.trim(), 'ini'));
+
+    } catch (error) {
+      await HandleError(error, exports.default.name, message);
+    }
   },
 };
-
-function GetHosting(): string {
-  const HN = os.hostname().toLowerCase();
-
-  const VKW = ["vps", "vm", "cloud", "aws", "gcp", "azure"];
-  const VPS = VKW.some((keyword) => HN.includes(keyword));
-
-  const Indicators = {
-    kvm: "KVM",
-    qemu: "QEMU",
-    virtualbox: "VirtualBox",
-    vmware: "VMware",
-    "hyper-v": "Microsoft Hyper-V",
-  };
-
-  const SysInfo = os.version?.().toLowerCase() || "";
-  const VM = Object.entries(Indicators).find(
-    ([key]) => SysInfo.includes(key) || HN.includes(key),
-  );
-
-  if (VM) return `VM (${VM[1]})`;
-  if (VPS) return "VPS/Cloud";
-  return "Local Machine";
-}

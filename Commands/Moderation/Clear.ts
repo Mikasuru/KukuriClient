@@ -1,45 +1,53 @@
-import { Client, Message } from "discord.js-selfbot-v13";
-import { Logger } from "../../Utils/Logger";
+import { Message, TextChannel, DMChannel } from "discord.js-selfbot-v13";
+import { ClientInit } from "../../Types/Client";
+import { FetchChMsg, SafeDelMsg, SendTempRep, SafeDelCmd } from "../../Utils/MessageUtils";
+import { HandleError } from "../../Utils/ErrorUtils";
+import { ParseIntArg } from "../../Utils/MiscUtils";
 
 export default {
   name: "clear",
   description: "Deletes a specified number of your own messages in the chat.",
-  usage: "clear <amount>",
-  execute: async (client: Client, message: Message, args: string[]) => {
-    if (!args[0] || isNaN(Number(args[0]))) {
-      return message.reply(
-        "Please provide a valid number of messages to delete. Usage: `!clear <amount>`",
-      );
-    }
-
-    const Amt = parseInt(args[0]);
-    if (Amt < 1 || Amt > 100) {
-      return message.reply("Please specify a number between 1 and 100.");
-    }
-
+  usage: "clear <amount 1-100>",
+  execute: async (client: ClientInit, message: Message, args: string[]) => {
     try {
-      const messages = await message.channel.messages.fetch({ limit: 100 });
-      const Own = messages
-        .filter((msg) => msg.author.id === client.user?.id)
-        .first(Amt);
+      const amountToDelete = ParseIntArg(args[0], 1, 100);
 
-      if (Own.length === 0) {
-        return message.reply("No messages found to delete.");
+      if (amountToDelete === null) {
+        await SendTempRep(message, `Invalid amount. Usage: ${client.prefix}${exports.default.usage}`);
+        return;
       }
 
-      for (const msg of Own) {
-        await msg.delete();
+      if (!(message.channel instanceof TextChannel || message.channel instanceof DMChannel)) {
+         await SendTempRep(message, "Cannot clear messages in this type of channel.");
+         return;
+      }
+      const fetchedMessages = await FetchChMsg(message.channel, 100);
+
+      if (!fetchedMessages) {
+        await SendTempRep(message, "Could not fetch messages.");
+        return;
       }
 
-      const Reply = await message.reply(
-        `Successfully deleted ${Own.length} message(s).`,
-      );
-      setTimeout(() => Reply.delete(), 3000);
+      const ownMessages = Array.from(fetchedMessages.values())
+        .filter(msg => msg.author.id === client.user?.id && msg.id !== message.id)
+        .slice(0, amountToDelete);
+
+      if (ownMessages.length === 0) {
+        await SendTempRep(message, "No recent messages found to delete.");
+        return;
+      }
+
+      let deletedCount = 0;
+      for (const msgToDelete of ownMessages) {
+        await SafeDelMsg(msgToDelete);
+        deletedCount++;
+      }
+
+      await SendTempRep(message, `Successfully deleted ${deletedCount} message(s).`);
+      SafeDelCmd(message, 3000);
+
     } catch (error) {
-      Logger.error(`Error in clear command: ${error}`);
-      message.reply(
-        "Failed to delete messages. Check permissions or try again.",
-      );
+      await HandleError(error, exports.default.name, message);
     }
   },
 };
