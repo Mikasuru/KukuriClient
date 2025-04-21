@@ -4,7 +4,6 @@
 </p>
 <p align="center">
   <img src="https://img.shields.io/github/stars/Mikasuru/KukuriClient?style=social" alt="GitHub stars" />
-  <img src="https://img.shields.io/github/license/Mikasuru/KukuriClient" alt="License" /> 
 </p>
 
 ---
