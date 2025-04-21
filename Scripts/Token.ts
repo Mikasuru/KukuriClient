@@ -34,19 +34,22 @@ async function addManualToken() {
   const allowUsersInput = await askQuestion(
     'Enter allowed users (comma-separated) or "all": ',
   );
-  const allowEveryoneInput = await askQuestion("Allow everyone? (yes/no): ");
 
   const allowUsers =
     allowUsersInput === "all"
       ? "all"
       : allowUsersInput.split(",").map((u) => u.trim());
-  const allowEveryone = allowEveryoneInput.toLowerCase() === "yes";
 
-  const config = existsSync("./config/tokens.json")
+    const config = existsSync("./config/tokens.json")
     ? JSON.parse(readFileSync("./config/tokens.json", "utf8"))
     : {};
 
-  config[name] = { prefix, token, allowUsers, allowEveryone };
+  config[name] = {
+    prefix,
+    token,
+    allowUsers
+    /*, allowEveryone*/
+  };
   writeFileSync("./config/tokens.json", JSON.stringify(config, null, 2));
 
   console.log(`Token for ${name} added successfully.`);
@@ -97,7 +100,6 @@ async function addQRCodeToken() {
       process.exit(0);
     });
 
-    // ใช้ QRLogin แทน login
     await client.QRLogin();
   } catch (error) {
     console.log("Failed to generate QR code:", error.message);
