@@ -21,7 +21,6 @@
     "discord.js-selfbot-v13": "^3.6.0",
     "dotenv": "^16.4.7",
     "figlet": "^1.8.0",
-    "sharp": "^0.33.5",
     "speedtest-net": "^2.2.0",
     "systeminformation": "^5.25.11"
   }
